@@ -1,0 +1,232 @@
+{
+  "version": 5,
+  "companySlots": ["OpenAI", "DeepSeek", "Anthropic", "Google", "xAI"],
+  "roles": ["worker", "explore", "verify"],
+  "rows": [
+    {
+      "day": "2026-01-05",
+      "provider": "synthetic",
+      "model": "gpt-synthetic",
+      "role": null,
+      "company": "OpenAI",
+      "input": "1200",
+      "output": "300",
+      "cacheRead": "2400",
+      "cacheWrite": "100",
+      "cost": 0.012
+    },
+    {
+      "day": "2026-01-06",
+      "provider": "synthetic",
+      "model": "gpt-synthetic",
+      "role": "worker",
+      "company": "OpenAI",
+      "input": "600",
+      "output": "200",
+      "cacheRead": "1200",
+      "cacheWrite": "0",
+      "cost": 0.006
+    },
+    {
+      "day": "2026-01-06",
+      "provider": "synthetic",
+      "model": "deepseek-synthetic",
+      "role": "explore",
+      "company": "DeepSeek",
+      "input": "800",
+      "output": "150",
+      "cacheRead": "400",
+      "cacheWrite": "0",
+      "cost": 0.003
+    },
+    {
+      "day": "2026-01-07",
+      "provider": "synthetic",
+      "model": "claude-synthetic",
+      "role": "verify",
+      "company": "Anthropic",
+      "input": "1000",
+      "output": "250",
+      "cacheRead": "1500",
+      "cacheWrite": "250",
+      "cost": 0.015
+    },
+    {
+      "day": "2026-01-07",
+      "provider": "synthetic",
+      "model": "gemini-synthetic",
+      "role": null,
+      "company": "Google",
+      "input": "700",
+      "output": "100",
+      "cacheRead": "500",
+      "cacheWrite": "0",
+      "cost": 0.004
+    },
+    {
+      "day": "2026-01-08",
+      "provider": "synthetic",
+      "model": "grok-synthetic",
+      "role": null,
+      "company": "xAI",
+      "input": "400",
+      "output": "80",
+      "cacheRead": "0",
+      "cacheWrite": "0",
+      "cost": 0.002
+    }
+  ],
+  "sessions": [
+    {
+      "startDay": "2026-01-05",
+      "endDay": "2026-01-08",
+      "role": null,
+      "name": "Synthetic example",
+      "sessionId": "synthetic-parent",
+      "days": [
+        {
+          "day": "2026-01-05",
+          "models": [
+            {
+              "provider": "synthetic",
+              "model": "gpt-synthetic",
+              "input": "1200",
+              "output": "300",
+              "cacheRead": "2400",
+              "cacheWrite": "100",
+              "cost": 0.012
+            }
+          ]
+        },
+        {
+          "day": "2026-01-07",
+          "models": [
+            {
+              "provider": "synthetic",
+              "model": "gemini-synthetic",
+              "input": "700",
+              "output": "100",
+              "cacheRead": "500",
+              "cacheWrite": "0",
+              "cost": 0.004
+            }
+          ]
+        },
+        {
+          "day": "2026-01-08",
+          "models": [
+            {
+              "provider": "synthetic",
+              "model": "grok-synthetic",
+              "input": "400",
+              "output": "80",
+              "cacheRead": "0",
+              "cacheWrite": "0",
+              "cost": 0.002
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "startDay": "2026-01-06",
+      "endDay": "2026-01-06",
+      "role": "worker",
+      "name": null,
+      "sessionId": "synthetic-shared",
+      "days": [
+        {
+          "day": "2026-01-06",
+          "models": [
+            {
+              "provider": "synthetic",
+              "model": "gpt-synthetic",
+              "input": "600",
+              "output": "200",
+              "cacheRead": "1200",
+              "cacheWrite": "0",
+              "cost": 0.006
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "startDay": "2026-01-06",
+      "endDay": "2026-01-06",
+      "role": "explore",
+      "name": null,
+      "sessionId": "synthetic-shared",
+      "days": [
+        {
+          "day": "2026-01-06",
+          "models": [
+            {
+              "provider": "synthetic",
+              "model": "deepseek-synthetic",
+              "input": "800",
+              "output": "150",
+              "cacheRead": "400",
+              "cacheWrite": "0",
+              "cost": 0.003
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "startDay": "2026-01-07",
+      "endDay": "2026-01-07",
+      "role": "verify",
+      "name": null,
+      "sessionId": null,
+      "days": [
+        {
+          "day": "2026-01-07",
+          "models": [
+            {
+              "provider": "synthetic",
+              "model": "claude-synthetic",
+              "input": "1000",
+              "output": "250",
+              "cacheRead": "1500",
+              "cacheWrite": "250",
+              "cost": 0.015
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "stats": {
+    "asOf": "2026-01-09T12:00:00Z",
+    "timezone": "UTC",
+    "oldestDay": "2026-01-05",
+    "newestDay": "2026-01-08",
+    "malformed": 0,
+    "unreadable": 0,
+    "future": 0,
+    "outOfRange": 0,
+    "coverage": {
+      "taskFiles": 3,
+      "malformedTasks": 0,
+      "unreadableTasks": 0,
+      "invalidTaskPaths": 0,
+      "missingChildLinks": 0,
+      "duplicateTaskLinks": 0,
+      "sddTasks": 0,
+      "unknownRoleTasks": 0,
+      "childFiles": 3,
+      "linkedChildFiles": 3,
+      "excludedChildFiles": 0,
+      "unlinkedChildFiles": 0,
+      "conflictingChildFiles": 0,
+      "parentFiles": 1,
+      "parentFilesExcluded": 0,
+      "unsafePaths": 0,
+      "unreadableDirectories": 0,
+      "unavailableRoots": 0,
+      "conflictingEntries": 0
+    }
+  }
+}

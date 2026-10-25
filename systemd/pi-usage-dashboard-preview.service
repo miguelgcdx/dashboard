@@ -1,0 +1,9 @@
+[Unit]
+Description=Regenerate the private React Pi usage preview
+ConditionPathExists=%h/Projects/pi-usage-dashboard/web/dist/.verified
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/Projects/pi-usage-dashboard
+UMask=0077
+ExecStart=/usr/bin/python3 -B %h/Projects/pi-usage-dashboard/dashboard.py --preview-react --output %h/.local/share/pi-usage-dashboard/preview.html

@@ -1,0 +1,7 @@
+{
+  "name": "pi-usage-dashboard-dev-runner",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix web run dev"
+  }
+}

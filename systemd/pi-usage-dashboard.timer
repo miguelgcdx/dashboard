@@ -1,0 +1,10 @@
+[Unit]
+Description=Regenerate the Pi usage dashboard every five minutes
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+Unit=pi-usage-dashboard.service
+
+[Install]
+WantedBy=timers.target

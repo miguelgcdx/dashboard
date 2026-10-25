@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pi usage — local development</title>
+  </head>
+  <body>
+    <div id="root"><p role="status">Loading local Pi usage aggregates…</p></div>
+    <noscript>JavaScript is required to load local usage.</noscript>
+    <script type="application/json" id="usage-data"></script>
+    <script type="module">
+      // Development only: the production IIFE still uses its offline HTML bridge.
+      try {
+        const response = await fetch('/__pi_usage_snapshot', {
+          cache: 'no-store', credentials: 'omit', mode: 'same-origin',
+        });
+        if (!response.ok) throw new Error('Snapshot unavailable');
+        const snapshot = await response.json();
+        document.getElementById('usage-data').textContent = JSON.stringify(snapshot);
+        await import('./src/main.tsx');
+      } catch {
+        const root = document.getElementById('root');
+        root.textContent = 'Local usage could not be loaded. Check Python availability and source access, then reload to retry.';
+        root.setAttribute('role', 'alert');
+      }
+    </script>
+  </body>
+</html>

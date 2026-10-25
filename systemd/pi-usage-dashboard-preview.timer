@@ -1,0 +1,10 @@
+[Unit]
+Description=Regenerate the private React Pi usage preview every five minutes
+
+[Timer]
+OnCalendar=*:2/5
+Persistent=true
+Unit=pi-usage-dashboard-preview.service
+
+[Install]
+WantedBy=timers.target
