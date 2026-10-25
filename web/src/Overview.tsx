@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { modelPriceContext, modelPriceReference } from './modelPrices';
-import { add, cacheShare, dollars, empty, formatTokens, volume } from './data';
+import { add, cacheShare, empty, formatTokens, volume } from './data';
+import { useSource } from './workspace';
 import type { Row, Snapshot, Totals } from './data';
 
 type Period = 'all' | 'day' | 'week' | 'month' | 'custom';
@@ -71,6 +72,7 @@ function rankProviders(rows: Row[]): [string, bigint][] {
 function ProviderUsage({ rows, ranked, scope, today, invalid, future }: {
   rows: Row[]; ranked: [string, bigint][]; scope: string; today: string; invalid: boolean; future: boolean;
 }) {
+  const { codex } = useSource();
   const total = ranked.reduce((sum, [, tokens]) => sum + tokens, 0n);
   const entries = ranked.slice(0, 5).map(([name, tokens]) => ({ label: providerLabel(name), tokens }));
   if (ranked.length > 5) entries.push({
@@ -88,7 +90,7 @@ function ProviderUsage({ rows, ranked, scope, today, invalid, future }: {
   });
   return <section className="panel provider-panel" aria-labelledby="providers-title" aria-describedby="providers-description">
     <div className="panel-heading"><h2 id="providers-title">Usage by provider</h2><span>Token share</span></div>
-    <p id="providers-description" className="visually-hidden">{scope}. Same selected daily rows and provider/model filters as the cards, including Pi parent and linked child usage once. Input + output + cache read + cache write; not cost or session-summary totals. Positive-volume providers only, ranked by exact tokens with name-order ties. Shares round to two decimals and may not sum to 100%. Missing records are not recorded zero or proof of inactivity. Future dates are after snapshot date {today}; recorded future usage remains included like the cards.</p>
+    <p id="providers-description" className="visually-hidden">{scope}. Same selected daily rows and provider/model filters as the cards, {codex ? 'including accepted Codex rows once' : 'including Pi parent and linked child usage once'}. Input + output + cache read + cache write; not cost or session-summary totals. Positive-volume providers only, ranked by exact tokens with name-order ties. Shares round to two decimals and may not sum to 100%. Missing records are not recorded zero or proof of inactivity. Future dates are after snapshot date {today}; recorded future usage remains included like the cards.</p>
     {invalid ? <p className="empty">Provider usage unavailable: invalid range.</p> : total === 0n ?
       <p className="empty">No positive token usage in this selection. {rows.length ? 'Recorded zero tokens.' : 'No recorded usage; missing records do not establish inactivity.'}</p> :
       <div className="provider-breakdown">
@@ -121,7 +123,8 @@ function ProviderUsage({ rows, ranked, scope, today, invalid, future }: {
 function ModelDetails({ provider, model, totals, descriptionId }: {
   provider: string; model: string; totals: Totals; descriptionId: string;
 }) {
-  const reference = modelPriceReference(provider, model);
+  const { cost: dollars, codex } = useSource();
+  const reference = codex ? null : modelPriceReference(provider, model);
   return <>
     <dl className="model-rates">
       <div><dt>Input · API reference (USD / 1M tokens)</dt><dd>{reference ? `$${reference.inputUsdPerMillion}` : 'Unavailable'}</dd></div>
@@ -129,7 +132,7 @@ function ModelDetails({ provider, model, totals, descriptionId }: {
       <div className="model-recorded-cost"><dt>Recorded cost estimate (USD)</dt><dd>{dollars(totals.cost)}</dd></div>
     </dl>
     <p className="visually-hidden" id={descriptionId}>
-      {modelPriceContext.billing} {modelPriceContext.historical} {modelPriceContext.variations} {modelPriceContext.accounting}{' '}
+      {codex ? 'Codex recorded cost and API rates: Unavailable. Tokens do not establish spend.' : `${modelPriceContext.billing} ${modelPriceContext.historical} ${modelPriceContext.variations} ${modelPriceContext.accounting}`}{' '}
       {reference ? `${reference.category}. Captured as of ${reference.checkedOn}. Official source (offline text): ${reference.sourceUrl}. ${reference.promotion ?? ''}` :
         'Rate unavailable: no verified exact provider/model match in the offline reference catalog.'}
     </p>
@@ -137,6 +140,8 @@ function ModelDetails({ provider, model, totals, descriptionId }: {
 }
 
 export function Overview({ data }: { data: Snapshot }) {
+  const { cost: dollars, codex, prefix, label: sourceLabel } = useSource();
+  const attribution = codex ? 'Accepted Codex rows; explicit nested roles only.' : 'Pi parent and linked child usage';
   const today = data.stats.asOf.slice(0, 10);
   const recordedDays = unique(data.rows.map(row => row.day));
   const latest = recordedDays.at(-1) ?? today;
@@ -267,11 +272,11 @@ export function Overview({ data }: { data: Snapshot }) {
     ['Total tokens', formatTokens(volume(totals)), 'Input + output + cache read + cache write'],
     ['Output tokens', formatTokens(totals.output), 'Generated output, counted separately'],
     ['Cache-read share', cacheShare(totals), 'Cache read / (input + cache read + cache write)'],
-    ['Recorded cost', dollars(totals.cost), 'Estimate from recorded usage, not an invoice'],
+    ['Recorded cost', dollars(totals.cost), codex ? 'Unavailable from Codex token metadata; no spend inferred' : 'Estimate from recorded usage, not an invoice'],
   ];
   return <div className="overview-view">
     <div className="page-heading"><div><p className="eyebrow">YOUR LOCAL WORKSPACE</p>
-      <h1>Overview</h1><p>Explore your recorded Pi usage, one calendar period at a time.</p></div>
+      <h1>Overview</h1><p>Explore your recorded {sourceLabel} usage, one calendar period at a time.</p></div>
       <span className="badge">Snapshot as of <time dateTime={data.stats.asOf}>{data.stats.asOf.slice(0, 16).replace('T', ' ')}</time> · {data.stats.timezone}</span></div>
     <section className="overview-controls" aria-label="Overview filters">
       <div className="usage-filters overview-selects">
@@ -375,7 +380,7 @@ export function Overview({ data }: { data: Snapshot }) {
               </span>
             </>;
             return <li key={bucket.start} data-recorded={bucket.recorded} data-state={state}>
-              {dayLinks ? <a className="trend-day" href={`#/sessions/${bucket.start}${daySuffix}`}
+              {dayLinks ? <a className="trend-day" href={`#${prefix}/sessions/${bucket.start}${daySuffix}`}
                 aria-label={`View sessions for ${bucket.start} · ${label} · ${provider || model ? 'Selected provider/model filters' : 'All providers and models'}`}>
                 {content}
               </a> : <>
@@ -399,10 +404,10 @@ export function Overview({ data }: { data: Snapshot }) {
                       const label = `${day.day > today ? 'Future date after snapshot · ' : ''}${day.recorded ?
                         `${tokens === 0n ? 'Recorded zero · ' : ''}${formatTokens(tokens)} tokens · ${dollars(day.value.cost)} recorded cost estimate` : 'No recorded usage'}`;
                       return <li key={day.day} data-state={state} data-recorded={day.recorded}>
-                        <a className="trend-all-sessions" href={`#/sessions/${day.day}`} aria-label={`View sessions for ${day.day} · All providers and models`}>
+                        <a className="trend-all-sessions" href={`#${prefix}/sessions/${day.day}`} aria-label={`View sessions for ${day.day} · All providers and models`}>
                           <time dateTime={day.day}>{day.day}</time><span>{daySuffix ? 'All sessions for this day' : label}</span>
                         </a>
-                        {daySuffix && <a className="trend-filtered-sessions" href={`#/sessions/${day.day}${daySuffix}`}
+                        {daySuffix && <a className="trend-filtered-sessions" href={`#${prefix}/sessions/${day.day}${daySuffix}`}
                           aria-label={`View filtered sessions for ${day.day} · Selected provider/model filters · ${label}`}>
                           <span>Filtered Sessions · Selected provider/model contributions only: {label}</span>
                         </a>}
@@ -417,8 +422,8 @@ export function Overview({ data }: { data: Snapshot }) {
       <ProviderUsage rows={selectedRows} ranked={rankedProviders} scope={scope} today={today} invalid={!!rangeError}
         future={!!range && range.end > today || selectedRows.some(row => row.day > today)} />
       <section className="panel models-panel" aria-labelledby="models-title"
-        aria-description={rankingMode === 'models' ? `${scope}. Up to five provider/model pairs from the same selected rows and provider/model filters as the cards. Pi parent and linked child usage.` :
-          `${scope}. Up to five recorded providers from the same selected rows and provider/model filters as the cards and provider donut. Pi parent and linked child usage once. Positive input + output + cache read + cache write tokens, ranked by exact volume with raw-name-order ties. Source identifiers, not inferred brands. ${rankedProviders.length > 5 ? `${rankedProviders.length - 5} additional positive-volume providers omitted from this ranking.` : 'Only recorded positive-volume providers are shown; unused ranks are omitted.'}`}>
+        aria-description={rankingMode === 'models' ? `${scope}. Up to five provider/model pairs from the same selected rows and provider/model filters as the cards. ${attribution}.` :
+          `${scope}. Up to five recorded providers from the same selected rows and provider/model filters as the cards and provider donut. ${attribution} once. Positive input + output + cache read + cache write tokens, ranked by exact volume with raw-name-order ties. Source identifiers, not inferred brands. ${rankedProviders.length > 5 ? `${rankedProviders.length - 5} additional positive-volume providers omitted from this ranking.` : 'Only recorded positive-volume providers are shown; unused ranks are omitted.'}`}>
         <div className="panel-heading ranking-heading">
           <div><h2 id="models-title" aria-live="polite">Top {rankingMode}</h2><span className="visually-hidden">By token volume</span></div>
           <div className="ranking-switch" role="group" aria-label="Ranking view">

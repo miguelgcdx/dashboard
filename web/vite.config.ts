@@ -7,6 +7,7 @@ import { defineConfig } from 'vite';
 import type { Plugin } from 'vite';
 
 const snapshotPath = '/__pi_usage_snapshot';
+const workspacePath = '/__usage_workspace';
 const dashboardPath: string = fileURLToPath(new URL('../dashboard.py', import.meta.url));
 const webPath: string = fileURLToPath(new URL('.', import.meta.url));
 const loopbackHosts = new Set(['127.0.0.1:5173', 'localhost:5173', '[::1]:5173']);
@@ -16,13 +17,16 @@ function localUsage(): Plugin {
     name: 'local-usage-snapshot',
     apply: 'serve',
     configureServer(server) {
-      let pending: Promise<string> | undefined;
+      const pending = new Map<string, Promise<string>>();
       const shutdown = new AbortController();
       server.httpServer?.once('close', () => shutdown.abort());
-      const collect = (): Promise<string> => {
-        // Only overlap is shared: a later page reload always collects fresh data.
-        pending ??= new Promise<string>((resolve, reject) => {
-          execFile('python3', ['-B', dashboardPath, '--dev-json'], {
+      const collect = (path: string): Promise<string> => {
+        // Only overlapping requests for the same envelope share work.
+        const current = pending.get(path);
+        if (current) return current;
+        const command = path === workspacePath ? '--workspace-json' : '--dev-json';
+        const result = new Promise<string>((resolve, reject) => {
+          execFile('python3', ['-B', dashboardPath, command], {
             encoding: 'utf8', timeout: 30_000, maxBuffer: 16 * 1024 * 1024,
             shell: false, killSignal: 'SIGKILL', signal: shutdown.signal,
           }, (error: Error | null, stdout: string) => {
@@ -30,8 +34,9 @@ function localUsage(): Plugin {
             if (error) reject(new Error('Usage snapshot unavailable.'));
             else resolve(stdout);
           });
-        }).finally(() => { pending = undefined; });
-        return pending;
+        }).finally(() => { pending.delete(path); });
+        pending.set(path, result);
+        return result;
       };
       server.middlewares.use((request, response, next) => {
         // Vite's Node request fields are not declared by this browser-only TS setup.
@@ -50,7 +55,7 @@ function localUsage(): Plugin {
           response.end('Local same-origin requests only.');
           return;
         }
-        if (incoming.url !== snapshotPath) return next();
+        if (incoming.url !== snapshotPath && incoming.url !== workspacePath) return next();
         response.setHeader('Content-Type', 'application/json; charset=utf-8');
         response.setHeader('Cache-Control', 'no-store');
         response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -61,7 +66,7 @@ function localUsage(): Plugin {
           response.end(JSON.stringify({ error: 'GET required.' }));
           return;
         }
-        void collect().then((snapshot) => {
+        void collect(incoming.url).then((snapshot) => {
           if (!response.destroyed) response.end(snapshot);
         }, () => {
           if (!response.destroyed) {

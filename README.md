@@ -2,10 +2,77 @@
 
 A local, offline HTML snapshot of Pi usage metadata. It summarizes tokens and cost by local calendar day, ISO Monday-start week, month, provider, and model. It does not export prompts, responses, tool arguments, paths, cwd, or task threads. The private React snapshot includes explicitly opted-in Pi names and actual Pi header IDs; the legacy dashboard does not.
 
+## Pi / Gentle Shell, Codex and Compare workspaces
+
+The React app has separate **Pi / Gentle Shell**, **Codex**, and **Compare** source
+navigation. Existing Pi links (`#/overview`, `#/companies`, `#/agents`,
+`#/sessions`, `#/stats` and their detail/filter links) are unchanged. Codex uses
+`#/codex/overview`, `#/codex/companies`, `#/codex/agents`, `#/codex/sessions`, and
+`#/codex/stats`; its detail/day/filter links stay in that source. Source switches
+reset view filters. The same focused views render each source, never merged totals.
+Missing/unavailable Codex leaves Pi and Compare usable, without fabricated records.
+
+Development now loads the additive `/__usage_workspace` endpoint, backed by
+`dashboard.py --workspace-json`. Its version-1 envelope is
+`{workspaceVersion: 1, sources: {pi: {snapshot}, codex: {snapshot, metadata}}}`.
+Each snapshot retains the strict Pi-compatible v5 wire shape; Codex metadata is a
+separate allowlisted capability/coverage object, not an extension to Pi v5. A
+failed collector yields `{snapshot: null, error: "Source unavailable."}` for only
+that source. Missing Codex roots carry their explicit metadata, but are unavailable
+for comparison capture. Invalid returned schemas fail closed. Old standalone
+v3/v4/v5 Pi snapshots still load, and `/__pi_usage_snapshot` / `--dev-json` retain
+their old v5 Pi-only behavior and source defaults. Both endpoints retain the same
+loopback/Host/Origin checks, GET-only policy, no-store, timeout, 16 MiB output limit
+and shared overlapping collection (per endpoint). Neither endpoint writes files.
+
+New workspace collection resolves Pi agent home from `--pi-agent-home`, then
+`PI_CODING_AGENT_DIR`, then `~/.pi/agent`. Parent sessions use `--sessions`, then
+`PI_CODING_AGENT_SESSION_DIR`, then that agent home's `sessions`; roles and child
+linkage use the selected agent home explicitly. Codex uses `--codex-home`, then
+`CODEX_HOME`, then `~/.codex`. Source homes/paths are configuration only, never
+exported. These options do not change old CLI/default/timer source resolution.
+Codex reads only supported rollout metadata under `sessions` and
+`archived_sessions`; see [accounting and exclusions](docs/codex-accounting.md).
+No live-source access is implied by running tests.
+
+Codex **recorded cost and names are Unavailable**, never $0/free usage. No spend
+is synthesized from tokens or API reference prices. Provider and model are
+independent explicit recorded labels; unknown labels remain unspecified. Companies
+still use the existing Python model classifier, not an invented provider identity.
+Only supported explicit nested child roles appear under Agents; no project,
+pstack or workflow attribution is inferred. Codex quality disclosures explain
+partial roots, cumulative-counter exclusions, unsupported lineage and warnings.
+
+For a private, self-contained offline workspace, after independent build verification:
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 python3 dashboard.py --preview-workspace --pi-agent-home /path/to/pi-agent --codex-home /path/to/codex-home --output /path/to/private/workspace.html
+```
+
+This is opt-in and requires a separate explicit output away from the live default.
+It reuses hashed CSP (`connect-src 'none'`) and the atomic 0600 / owned-0700 writer.
+It makes no network requests and **never auto-refreshes**, preserving unsaved
+comparison work. Legacy HTML and `--preview-react` retain their refresh behavior;
+no service/timer is added or changed.
+
+Compare requires your own experiment/project and run/workflow labels and explicit
+measured-file selection from each runtime. Parents never automatically select or
+recount children. Captures freeze accepted date/model token summaries with snapshot
+as-of/timezone; source navigation preserves captures during this page lifetime.
+Input, output, cache read and cache write are disjoint exact integer categories;
+reasoning already in output is not added again. Different models compare setups,
+not harness causation; there is no automatic quality/cost winner. Export JSON to
+text (copy to a private file), or import text/a JSON file to restore captures.
+Invalid imports leave existing work unchanged. Exports omit source paths, session
+IDs and transcript names. There is no automatic persistence: export before
+closing/reloading. Use the same task/docs/model/settings/baseline and comparable
+cache conditions when drawing conclusions.
+
 ## Local React development with real usage
 
 This is one project: Python collects and sanitizes usage, and React displays the
-same private v5 snapshot in Vite development and the offline production HTML.
+same private snapshots in Vite development and offline production HTML. The new
+workspace envelope keeps source identity/capabilities separate from Pi v5.
 Version 5 adds nullable, validated actual Pi header `sessionId` values on measured
 file summaries only. These are **not unique file or conversation IDs**: multiple
 measured files can share one. IDs persist across snapshots and may correlate
@@ -30,9 +97,9 @@ pnpm dev
 
 Open **http://127.0.0.1:5173/** to use your actual local Pi usage with Vite's normal
 source updates/HMR. No separate snapshot generation or production build is needed.
-Python reads `PI_CODING_AGENT_SESSION_DIR` when set, otherwise
-`~/.pi/agent/sessions`; child linkage and configured roles use metadata under
-`~/.pi/agent/`. Reload the page to collect fresh usage; HMR updates source code,
+Workspace source resolution follows the options/environment described above.
+The legacy Pi-only endpoint still reads `PI_CODING_AGENT_SESSION_DIR` when set,
+otherwise `~/.pi/agent/sessions`, with child metadata under `~/.pi/agent/`. Reload the page to collect fresh usage; HMR updates source code,
 not the collected data. Loading and collection failures are shown explicitly,
 never replaced with fabricated data.
 

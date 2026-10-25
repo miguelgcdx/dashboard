@@ -1,4 +1,5 @@
-import { add, dollars, empty, formatTokens, volume } from './data';
+import { add, empty, formatTokens, volume } from './data';
+import { useSource } from './workspace';
 import type { Snapshot, Totals } from './data';
 
 const dayMs = 86_400_000;
@@ -6,6 +7,7 @@ const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Satur
 const isoDay = (time: number): string => new Date(time).toISOString().slice(0, 10);
 
 export function Stats({ data }: { data: Snapshot }) {
+  const { cost: dollars, codex } = useSource();
   // asOf already carries the snapshot's local date. UTC is only label arithmetic:
   // interpreting the instant or using browser-local setters would shift days.
   const asOfDay = data.stats.asOf.slice(0, 10);
@@ -59,14 +61,14 @@ export function Stats({ data }: { data: Snapshot }) {
       <p><strong>Calendar range: <time>{startDay}</time> to <time>{endDay}</time></strong></p>
       <p>Totals cover {startDay} through {asOfDay}, inclusive. Later days in the final week are future, not inactive.</p>
       <p>As of {data.stats.asOf} · Timezone: {data.stats.timezone}</p>
-      <p>Parent + safely linked non-SDD child daily rows only. Historical attribution may be incomplete;
+      <p>{codex ? 'Accepted Codex daily rows; explicit nested child roles only.' : 'Parent + safely linked non-SDD child daily rows only.'} Historical attribution may be incomplete;
         missing days do not prove inactivity. See Data quality & attribution below.</p>
     </div>
     <div className="metrics stats-metrics" aria-label="52-week measured usage">
       <article className="metric"><h2>Measured tokens</h2><strong>{formatTokens(volume(totals))}</strong>
         <p>Input + output + cache read + cache write; no session-summary recounting.</p></article>
       <article className="metric"><h2>Recorded cost · Estimate</h2><strong>{dollars(totals.cost)}</strong>
-        <p>Sum of recorded cost estimates, not a bill or verified spending.</p></article>
+        <p>{codex ? 'Recorded cost: Unavailable; no spend is inferred from tokens.' : 'Sum of recorded cost estimates, not a bill or verified spending.'}</p></article>
       <article className="metric"><h2>Recorded days</h2><strong>{daily.size}</strong>
         <p>Dates with accepted rows, including recorded zero. Not unique conversations.</p></article>
     </div>

@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Button } from '@radix-ui/themes';
-import { add, cacheShare, dollars, empty, formatTokens, volume } from './data';
+import { add, cacheShare, empty, formatTokens, volume } from './data';
+import { useSource } from './workspace';
 import type { Company, Row, Totals } from './data';
 
 export function sum(rows: Row[]): Totals {
@@ -38,10 +39,11 @@ type Entry = { key: string; labels: string[]; totals: Totals; companies: Set<Com
 function Breakdown({ title, entries, scope, showCompany = false }: {
   title: string; entries: Entry[]; scope: string; showCompany?: boolean;
 }) {
+  const { cost: dollars, codex } = useSource();
   const byModel = title === 'Model totals';
   return <section className="panel usage-breakdown" aria-label={title}>
     <h2>{title}</h2><div className="table-wrap"><table>
-      <caption className="muted">{scope} and filters only · Recorded cost is an estimate.</caption>
+      <caption className="muted">{scope} and filters only · {codex ? 'Recorded cost: Unavailable.' : 'Recorded cost is an estimate.'}</caption>
       <thead><tr>{['Provider', ...(byModel ? ['Model'] : []), ...(showCompany ? ['Company'] : []), 'Total tokens', 'Input', 'Output', 'Cache read', 'Cache write', 'Cache-read share', 'Recorded cost'].map((label) =>
         <th key={label} scope="col">{label}</th>)}</tr></thead>
       <tbody>{entries.map(({ key, labels, totals, companies }) => <tr key={key}>
@@ -62,6 +64,7 @@ export function UsageView({ rows, name, scope, renderPanels, showModelCompany = 
     rows: Row[]; buckets: Map<string, Totals>; period: Period; selectionKey: string;
   }) => ReactNode;
 }) {
+  const { cost: dollars } = useSource();
   const [provider, setProvider] = useState('');
   const [model, setModel] = useState('');
   const [period, setPeriod] = useState<Period>('day');

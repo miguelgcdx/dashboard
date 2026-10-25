@@ -2,13 +2,13 @@ import { useState } from "react";
 import {
   add,
   cacheShare,
-  dollars,
   empty,
   formatTokens,
   tokenKeys,
   volume,
 } from "./data";
 import type { SessionModel, SessionSummary, Snapshot, Totals } from "./data";
+import { useSource } from './workspace';
 
 // Accept only a literal calendar-day route, never decoded paths or normalized dates.
 export function sessionDay(route: string): string | undefined {
@@ -92,6 +92,7 @@ function aboveThreshold(value: Totals, threshold: Threshold): boolean {
 }
 
 function Subtotal({ value }: { value: Totals }) {
+  const { cost: dollars } = useSource();
   return (
     <span className="session-subtotal">
       {formatTokens(volume(value))} tokens · {dollars(value.cost)} recorded cost
@@ -102,6 +103,7 @@ function Subtotal({ value }: { value: Totals }) {
 }
 
 function Metrics({ value }: { value: Totals }) {
+  const { cost: dollars } = useSource();
   const entries = [
     ["Total tokens", formatTokens(volume(value))],
     ["Input", formatTokens(value.input)],
@@ -139,6 +141,7 @@ function DayGroup({
   subset: boolean;
   sharedIds: ReadonlySet<string>;
 }) {
+  const { prefix, codex } = useSource();
   const [open, setOpen] = useState(selected);
   const date = new Date(`${day}T00:00:00Z`);
   const weekday = date.toLocaleDateString("en-US", {
@@ -194,8 +197,8 @@ function DayGroup({
                 const subtotal = total(models);
                 const owner =
                   session.role === null
-                    ? "Parent"
-                    : `Non-SDD role: ${session.role}`;
+                    ? codex ? 'Parent / role unavailable' : "Parent"
+                    : `${codex ? 'Explicit nested role' : 'Non-SDD role'}: ${session.role}`;
                 return (
                   <li key={index} className="session-file">
                     <details>
@@ -210,7 +213,7 @@ function DayGroup({
                         </span>
                         {session.sessionId !== null && sharedIds.has(session.sessionId) && (
                           <span className="session-shared-id">
-                            Shared Pi ID across measured files
+                            Shared {codex ? 'Codex' : 'Pi'} ID across measured files
                           </span>
                         )}
                         <Subtotal value={subtotal} />
@@ -253,7 +256,7 @@ function DayGroup({
     {!selected && (
       <a
         className="session-day-link"
-        href={`#/sessions/${day}`}
+        href={`#${prefix}/sessions/${day}`}
         aria-label={`Open day page · ${day} · All sessions, reset name/share filters`}
       >
         Open day page
@@ -274,6 +277,7 @@ export function Sessions({
   provider?: string;
   model?: string;
 }) {
+  const { prefix, codex } = useSource();
   // Count measured files across the entire snapshot, never day appearances or
   // the visible subset. A repeated header ID is not a deduplication key.
   const idCounts = new Map<string, number>();
@@ -350,22 +354,22 @@ export function Sessions({
     <div className="sessions-view">
       {day && (
         <div className="session-actions">
-          <a className="sessions-back" href="#/sessions">
+          <a className="sessions-back" href={`#${prefix}/sessions`}>
             ← All sessions · Clear date and label filters
           </a>
           {filtered && (
-            <a className="sessions-back" href={`#/sessions/${day}`}>
+            <a className="sessions-back" href={`#${prefix}/sessions/${day}`}>
               Clear provider/model filters · Keep day
             </a>
           )}
-          <a className="sessions-back" href="#/overview">
+          <a className="sessions-back" href={`#${prefix}/overview`}>
             ← Back to Overview
           </a>
         </div>
       )}
       <div className="page-heading">
         <div>
-          <p className="eyebrow">PI USAGE · PRIVATE FILE SUMMARIES</p>
+          <p className="eyebrow">{codex ? 'CODEX' : 'PI'} USAGE · PRIVATE FILE SUMMARIES</p>
           <h1>{day ? `Sessions · ${day}` : "Sessions"}</h1>
           <p>
             {day ? "Selected event-local day only" : "All accepted usage dates"}{" "}
@@ -393,6 +397,8 @@ export function Sessions({
             Session name
             <input
               type="search"
+              disabled={codex}
+              placeholder={codex ? 'Unavailable for Codex' : undefined}
               value={name}
               onChange={(event) => setName(event.target.value)}
               aria-describedby="session-name-help"
@@ -424,9 +430,7 @@ export function Sessions({
       </section>
       <div className={invalid ? "session-search-scope" : undefined}>
         <p id="session-name-help" className="visually-hidden">
-          Case-insensitive substring of the explicit Pi name only; surrounding
-          search spaces are ignored. Unnamed parents and children are excluded
-          while searching.
+          {codex ? 'Codex names: Unavailable. No inferred titles or name search.' : 'Case-insensitive substring of the explicit Pi name only; surrounding search spaces are ignored. Unnamed parents and children are excluded while searching.'}
         </p>
         <p id="session-share-help" className="visually-hidden">
           Enter 0–100, with up to 6 decimal places (e.g. 95.5), or leave empty
@@ -525,10 +529,7 @@ export function Sessions({
           )}
           {!subset && (
             <p className="muted">
-              Token categories are compared exactly. Recorded cost estimates
-              allow rounding differences up to the greater of $0.000000001 or
-              one trillionth of the larger total. Matching totals do not prove
-              complete historical attribution.
+              {codex ? 'Token categories are compared exactly. Recorded cost: Unavailable.' : 'Token categories are compared exactly. Recorded cost estimates allow rounding differences up to the greater of $0.000000001 or one trillionth of the larger total.'} Matching totals do not prove complete historical attribution.
             </p>
           )}
         </section>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { add, cacheShare, dollars, empty, formatTokens, volume } from './data';
+import { add, cacheShare, empty, formatTokens, volume } from './data';
+import { useSource } from './workspace';
 import type { Company, Row, Totals } from './data';
 import { modelPriceContext, modelPriceReference } from './modelPrices';
 import { companyLabel, periodStart } from './UsageView';
@@ -27,6 +28,7 @@ function CacheReadShare({ totals, className, descriptionId }: {
 export function AgentPanels({ rows, buckets, period, asOf, role, selectionKey }: {
   rows: Row[]; buckets: Map<string, Totals>; period: Period; asOf: string; role: string; selectionKey: string;
 }) {
+  const { cost: dollars, codex } = useSource();
   const [mode, setMode] = useState<'models' | 'providers'>('models');
   const [expanded, setExpanded] = useState<string | null>(null);
   useEffect(() => setExpanded(null), [selectionKey]);
@@ -103,7 +105,7 @@ export function AgentPanels({ rows, buckets, period, asOf, role, selectionKey }:
               const isExpanded = expanded === item.key;
               const buttonId = `agent-model-toggle-${index}`, detailsId = `agent-model-details-${index}`, descriptionId = `agent-model-reference-${index}`;
               const cacheDescriptionId = `agent-model-cache-${index}`;
-              const reference = modelPriceReference(item.provider, item.model);
+              const reference = codex ? null : modelPriceReference(item.provider, item.model);
               return <li key={item.key}>
                 <button type="button" className="model-toggle" id={buttonId} aria-expanded={isExpanded}
                   aria-controls={detailsId} aria-describedby={`${cacheDescriptionId}${isExpanded ? ` ${descriptionId}` : ''}`}
@@ -125,7 +127,7 @@ export function AgentPanels({ rows, buckets, period, asOf, role, selectionKey }:
                       <div className="model-recorded-cost"><dt>Recorded cost estimate (USD)</dt><dd>{dollars(item.totals.cost)}</dd></div>
                     </dl>
                     <p className="visually-hidden" id={descriptionId}>
-                      {modelPriceContext.billing} {modelPriceContext.historical} {modelPriceContext.variations} {modelPriceContext.accounting}{' '}
+                      {codex ? 'Codex recorded cost and API rates: Unavailable. Tokens do not establish spend.' : `${modelPriceContext.billing} ${modelPriceContext.historical} ${modelPriceContext.variations} ${modelPriceContext.accounting}`}{' '}
                       {reference ? `${reference.category}. Captured as of ${reference.checkedOn}. Official source (offline text): ${reference.sourceUrl}. ${reference.promotion ?? ''}` :
                         'Rate unavailable: no verified exact provider/model match in the offline reference catalog.'}
                     </p>

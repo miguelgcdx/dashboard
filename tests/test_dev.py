@@ -184,7 +184,7 @@ class DevTests(unittest.TestCase):
         self.assertLessEqual(set(package.get("devDependencies", {})), {"command-code"})
         document = (WEB / "index.html").read_text()
         self.assertIn('type="application/json" id="usage-data"', document)
-        self.assertIn("fetch('/__pi_usage_snapshot'", document)
+        self.assertIn("fetch('/__usage_workspace'", document)
         self.assertIn(".textContent = JSON.stringify(snapshot)", document)
         self.assertIn('role="status"', document)
         self.assertIn("root.setAttribute('role', 'alert')", document)
@@ -198,7 +198,7 @@ class DevTests(unittest.TestCase):
         for setting in ("host: '127.0.0.1'", "port: 5173", "strictPort: true", "cors: false",
                         "fs: { strict: true, allow: [webPath] }", "publicDir: false",
                         "entry: 'src/main.tsx'", "formats: ['iife']", "apply: 'serve'",
-                        "execFile('python3', ['-B', dashboardPath, '--dev-json']",
+                        "execFile('python3', ['-B', dashboardPath, command]", "'--workspace-json' : '--dev-json'", "'/__usage_workspace'",
                         "timeout: 30_000", "maxBuffer: 16 * 1024 * 1024", "shell: false",
                         "new URL('../dashboard.py', import.meta.url)",
                         "new URL('.', import.meta.url)"):
@@ -228,6 +228,8 @@ class DevTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="pi-dev-test-") as directory:
             home = Path(directory)
             env = synthetic_home(home)
+            env['PI_CODING_AGENT_DIR'] = str(home / '.pi/agent')
+            env['CODEX_HOME'] = str(home / 'synthetic-codex')
             mode = home / "collector-mode"
             mode.write_text("ok")
             binary = home / "bin"
@@ -378,6 +380,77 @@ os.execv(REAL_PYTHON, [REAL_PYTHON, *sys.argv[1:]])
                 self.assertEqual(json.load(response)["version"], 5)
             self.assertEqual(len((home / "calls").read_text().splitlines()), 3,
                              "Failed collection was cached or later requests were not fresh")
+
+    def test_managed_workspace_endpoint_sources_errors_and_security(self):
+        with self.dev_server() as (opener, home, env):
+            root = Path(env['CODEX_HOME']) / 'sessions'
+            root.mkdir(parents=True)
+            counters = dict(input_tokens=100, cached_input_tokens=20, output_tokens=30,
+                            reasoning_output_tokens=5, cache_write_input_tokens=10)
+            (root / 'rollout-synthetic.jsonl').write_text('\n'.join(json.dumps(item) for item in [
+                {'type': 'session_meta', 'payload': {'id': 'synthetic-codex', 'model_provider': 'explicit-provider', 'cwd': '/PRIVATE_CWD'}},
+                {'type': 'turn_context', 'payload': {'model': 'gpt-codex-only'}},
+                {'type': 'event_msg', 'timestamp': '2026-01-08T12:00:00Z', 'payload': {
+                    'type': 'token_count', 'info': {'total_token_usage': counters, 'last_token_usage': counters}}},
+            ]))
+            endpoint = URL + '__usage_workspace'
+            def request(_):
+                client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                with client.open(endpoint, timeout=10) as response:
+                    self.assertEqual(response.headers['Cache-Control'], 'no-store')
+                    self.assertEqual(response.headers['Cross-Origin-Resource-Policy'], 'same-origin')
+                    self.assertIsNone(response.headers.get('Access-Control-Allow-Origin'))
+                    text = response.read().decode()
+                    self.assert_private_fields_absent(text, home)
+                    return text
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                responses = list(pool.map(request, range(4)))
+            self.assertEqual(len(set(responses)), 1)
+            self.assertEqual((home / 'calls').read_text().splitlines(), ['1'])
+            data = json.loads(responses[0])
+            self.assertEqual(data['workspaceVersion'], 1)
+            pi, codex = data['sources']['pi']['snapshot'], data['sources']['codex']['snapshot']
+            self.assertEqual(len(pi['rows']), 3)
+            self.assertEqual(len(codex['rows']), 1)
+            self.assertEqual(codex['rows'][0]['input'], '70')
+            self.assertEqual(codex['rows'][0]['provider'], 'explicit-provider')
+            self.assertFalse(data['sources']['codex']['metadata']['costAvailable'])
+            for headers in ({'Origin': 'null'}, {'Origin': 'https://foreign.invalid'}, {'Host': 'foreign.invalid:5173'}):
+                with self.assertRaises(urllib.error.HTTPError) as denied:
+                    opener.open(urllib.request.Request(endpoint, headers=headers), timeout=3)
+                self.assertEqual(denied.exception.code, 403)
+                denied.exception.close()
+            for method in ('POST', 'OPTIONS', 'HEAD'):
+                with self.assertRaises(urllib.error.HTTPError) as denied:
+                    opener.open(urllib.request.Request(endpoint, method=method), timeout=3)
+                self.assertEqual(denied.exception.code, 405)
+                denied.exception.close()
+            self.assertEqual(len((home / 'calls').read_text().splitlines()), 1)
+            if shutil.which('chromium'):
+                with tempfile.TemporaryDirectory(prefix='workspace-dev-browser-') as name:
+                    profile = Path(name)
+                    result = subprocess.run([shutil.which('chromium'), '--headless', '--disable-gpu',
+                        '--no-first-run', '--no-default-browser-check', '--disable-sync',
+                        '--disable-background-networking', '--disable-component-update', '--disable-extensions',
+                        '--disable-breakpad', '--disable-crash-reporter', '--password-store=basic',
+                        f'--user-data-dir={profile}', f'--crash-dumps-dir={profile}',
+                        '--virtual-time-budget=10000', '--dump-dom', URL + '#/codex/overview'],
+                        capture_output=True, text=True, timeout=45,
+                        env={'PATH': os.defpath, 'HOME': name, 'XDG_CONFIG_HOME': str(profile / 'config'),
+                             'XDG_CACHE_HOME': str(profile / 'cache'), 'LANG': 'C.UTF-8'})
+                    self.assertEqual(result.returncode, 0)
+                    self.assertIn('<h1>Overview</h1>', result.stdout)
+                    self.assertIn('gpt-codex-only', result.stdout)
+                    self.assertIn('Recorded cost</h2><strong>Unavailable</strong>', result.stdout)
+                    self.assertNotIn('gpt-dev-fixture', result.stdout)
+            (home / 'collector-mode').write_text('fail')
+            with self.assertRaises(urllib.error.HTTPError) as failed:
+                opener.open(endpoint, timeout=10)
+            with failed.exception as response:
+                self.assertEqual(response.code, 503)
+                self.assertEqual(json.load(response), {'error': 'Usage snapshot unavailable. Reload to retry.'})
+            (home / 'collector-mode').write_text('ok')
+            self.assertEqual(json.loads(request(0))['workspaceVersion'], 1)
 
     @unittest.skipUnless(shutil.which("chromium"), "Chromium unavailable; dev browser proof pending")
     def test_managed_root_dev_chromium_real_shaped_source_and_error(self):

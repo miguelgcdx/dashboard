@@ -23,6 +23,21 @@ summary:focus-visible {
   outline-offset: 5px;
   border-radius: 3px;
 }
+.source-nav {
+  padding: 0.5rem clamp(1rem, 4vw, 4rem);
+  border-bottom: 1px solid #272d3b;
+  background: #11151e;
+}
+.source-nav a[data-active="true"] {
+  color: #d8d2ff;
+  background: #28243e;
+  border-color: #40375f;
+}
+.source-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+}
 .app-bar {
   display: flex;
   align-items: center;

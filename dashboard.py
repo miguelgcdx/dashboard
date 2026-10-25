@@ -12,6 +12,7 @@ from pathlib import Path
 import stat
 import tempfile
 
+from codex_usage import collect_codex_usage
 from pi_usage import (
     collect_combined_usage,
     collect_usage,
@@ -604,8 +605,97 @@ def react_snapshot_json(usage):
     )
 
 
+_CODEX_WARNINGS = (
+    "duplicateFiles", "conflictingThreads", "invalidCounters",
+    "ambiguousInitialCounters", "forkedThreads", "unsupportedLineage",
+    "invalidIdentity", "invalidTimestamps", "missingModels",
+)
+
+
+def workspace_json(pi, codex):
+    """Versioned source envelope; never extend or reinterpret the Pi v5 schema."""
+    sources = {}
+    for name, usage in (("pi", pi), ("codex", codex)):
+        if usage is None:
+            sources[name] = {"snapshot": None, "error": "Source unavailable."}
+            continue
+        snapshot = json.loads(react_snapshot_json(usage))
+        entry = {"snapshot": snapshot}
+        if name == "codex":
+            metadata = usage["codex"]
+            def status(value):
+                if value not in ("available", "missing", "unavailable"):
+                    raise ValueError("Invalid source status")
+                return value
+            def boolean(key):
+                value = metadata[key]
+                if type(value) is not bool:
+                    raise ValueError("Invalid source capability")
+                return value
+            if boolean("costAvailable") or boolean("namesAvailable"):
+                raise ValueError("Unsupported Codex capability")
+            if (metadata["lineage"] != "explicit-thread-spawn-only" or
+                    metadata["accounting"] != "validated-cumulative-deltas"):
+                raise ValueError("Unsupported Codex accounting")
+            warnings = {}
+            for key in _CODEX_WARNINGS:
+                value = metadata["warnings"][key]
+                if type(value) is not int or not 0 <= value <= 2**53 - 1:
+                    raise ValueError("Invalid source warning")
+                warnings[key] = value
+            if (any(row["cost"] != 0 for row in snapshot["rows"]) or
+                    any(session["name"] is not None for session in snapshot["sessions"]) or
+                    any(model["cost"] != 0 for session in snapshot["sessions"]
+                        for day in session["days"] for model in day["models"])):
+                raise ValueError("Unsupported Codex cost or name")
+            entry["metadata"] = {
+                "status": status(metadata["status"]),
+                "roots": {key: status(metadata["roots"][key])
+                          for key in ("sessions", "archived_sessions")},
+                "costAvailable": False, "namesAvailable": False,
+                "modelAvailable": boolean("modelAvailable"),
+                "providerAvailable": boolean("providerAvailable"),
+                "lineage": metadata["lineage"], "accounting": metadata["accounting"],
+                "warnings": warnings,
+            }
+        sources[name] = entry
+    return (json.dumps({"workspaceVersion": 1, "sources": sources},
+                       ensure_ascii=True, allow_nan=False)
+            .replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026"))
+
+
+def collect_workspace(pi_agent_home=None, codex_home=None, sessions=None):
+    """Resolve source config only here; pass every root explicitly to collectors."""
+    agent = Path(pi_agent_home or os.environ.get("PI_CODING_AGENT_DIR") or
+                 "~/.pi/agent").expanduser()
+    codex_home = Path(codex_home or os.environ.get("CODEX_HOME") or "~/.codex").expanduser()
+    parents = Path(sessions or os.environ.get("PI_CODING_AGENT_SESSION_DIR") or
+                   agent / "sessions").expanduser()
+    try:
+        pi = collect_combined_usage(parents, task_dir=agent / "gentle-agents/tasks",
+                                    child_session_dir=agent / "gentle-agents/sessions",
+                                    agent_dir=agent / "agents")
+    except Exception:
+        pi = None
+    try:
+        codex = collect_codex_usage(codex_home)
+    except Exception:
+        codex = None
+    # Invalid returned payloads are hard errors, not a fabricated empty source.
+    return workspace_json(pi, codex)
+
+
 def render_react_dashboard(usage, assets_dir):
     """Embed the local IIFE/CSS and shared snapshot; fail before publication."""
+    return _render_react_payload(react_snapshot_json(usage), assets_dir)
+
+
+def render_workspace_dashboard(payload, assets_dir):
+    """Render only bridge-generated envelopes; no refresh that loses captures."""
+    return _render_react_payload(payload, assets_dir, workspace=True)
+
+
+def _render_react_payload(payload, assets_dir, workspace=False):
     assets = Path(assets_dir)
     try:
         script = (assets / "dashboard.js").read_text(encoding="utf-8")
@@ -618,16 +708,15 @@ def render_react_dashboard(usage, assets_dir):
         raise ValueError("React build assets must not be empty")
     if re.search(r"</script", script, re.I) or re.search(r"</style", style, re.I):
         raise ValueError("React build contains an unsafe inline closing tag")
-    payload = react_snapshot_json(usage)
-
     def digest(value):
         return base64.b64encode(hashlib.sha256(value.encode("utf-8")).digest()).decode(
             "ascii"
         )
 
+    refresh = '' if workspace else '<meta http-equiv="refresh" content="300">'
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="300">
+{refresh}
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-{digest(script)}'; style-src 'sha256-{digest(style)}'; connect-src 'none'; img-src 'none'; font-src 'none'; object-src 'none'; form-action 'none'; base-uri 'none'">
 <title>Pi usage · Offline preview</title><style>{style}</style></head><body>
 <div id="root">Loading offline Pi usage preview…</div>
@@ -674,8 +763,8 @@ def main(argv=None):
     parser.add_argument(
         "--sessions",
         type=Path,
-        default=DEFAULT_SESSIONS,
-        help="Pi JSONL session directory",
+        default=None,
+        help="Pi JSONL session directory (legacy default unchanged)",
     )
     parser.add_argument(
         "--output", type=Path, help="destination HTML file (required for React preview)"
@@ -691,7 +780,33 @@ def main(argv=None):
         action="store_true",
         help="emit private v5 usage JSON with explicit Pi names/header IDs; no files written",
     )
+    mode.add_argument('--workspace-json', action='store_true',
+                      help='emit versioned Pi/Codex workspace JSON; no files written')
+    mode.add_argument('--preview-workspace', action='store_true',
+                      help='offline Pi/Codex/Compare workspace without auto-refresh; requires separate --output')
+    parser.add_argument('--pi-agent-home', type=Path,
+                        help='workspace Pi agent home (otherwise PI_CODING_AGENT_DIR or ~/.pi/agent)')
+    parser.add_argument('--codex-home', type=Path,
+                        help='workspace Codex home (otherwise CODEX_HOME or ~/.codex)')
     args = parser.parse_args(argv)
+    if args.workspace_json or args.preview_workspace:
+        if args.workspace_json and args.output is not None:
+            parser.error('--workspace-json cannot be combined with --output')
+        if args.preview_workspace and (args.output is None or
+                args.output.expanduser().resolve() == DEFAULT_OUTPUT.resolve()):
+            parser.error('--preview-workspace requires --output away from the live default dashboard')
+        try:
+            payload = collect_workspace(args.pi_agent_home, args.codex_home, args.sessions)
+        except Exception:
+            raise SystemExit('Usage workspace unavailable.') from None
+        if args.workspace_json:
+            print(payload)
+            return
+        html = render_workspace_dashboard(payload, Path(__file__).resolve().parent / 'web/dist')
+        write_dashboard(args.output, html)
+        print('Dashboard updated (private usage workspace).')
+        return
+    args.sessions = args.sessions or DEFAULT_SESSIONS
     if args.dev_json:
         if args.output is not None:
             parser.error("--dev-json cannot be combined with --output")

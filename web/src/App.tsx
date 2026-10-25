@@ -5,6 +5,9 @@ import { Overview } from "./Overview";
 import { Sessions, sessionRoute } from "./Sessions";
 import { Stats } from "./Stats";
 import type { Snapshot } from "./data";
+import { Compare } from './Compare';
+import { SourceContext, codexWarningKeys } from './workspace';
+import type { Workspace, CodexMetadata } from './workspace';
 
 const routes = [
   "Overview",
@@ -71,13 +74,25 @@ function Quality({ data }: { data: Snapshot }) {
   );
 }
 
-export function App({ data }: { data: Snapshot }) {
-  const [route, setRoute] = useState(readRoute);
-  useEffect(() => {
-    const change = () => setRoute(readRoute());
-    window.addEventListener("hashchange", change);
-    return () => window.removeEventListener("hashchange", change);
-  }, []);
+function CodexQuality({ info, data }: { info: CodexMetadata | null; data: Snapshot | null }) {
+  return <details className="quality" open><summary>Codex data quality & limitations</summary>
+    <p>Codex status: {info?.status ?? 'unavailable'}. Recorded cost: Unavailable. Session names: Unavailable.</p>
+    <p>Validated cumulative deltas only. Input excludes cached read/write; output already includes reasoning.
+      Explicit nested thread-spawn roles only, never inferred workflow or project labels. Unknown lineage remains unknown.
+      Forks, ambiguous initial counters, resets and conflicting copies are conservatively excluded. Retained records do not prove complete history.</p>
+    {info && <><p>Rollout roots: sessions {info.roots.sessions}; archived_sessions {info.roots.archived_sessions}.
+      Model metadata: {info.modelAvailable ? 'some explicit labels' : 'Unavailable'}; provider metadata: {info.providerAvailable ? 'some explicit labels' : 'Unavailable'}.</p>
+      <ul>{codexWarningKeys.map(key => <li key={key}>{key}: {info.warnings[key]}</li>)}</ul></>}
+    {data && <p>Malformed lines: {data.stats.malformed}; unreadable files: {data.stats.unreadable};
+      future events: {data.stats.future}; out-of-range events: {data.stats.outOfRange};
+      unsafe paths: {data.stats.coverage.unsafePaths}; unavailable roots: {data.stats.coverage.unavailableRoots};
+      unreadable directories: {data.stats.coverage.unreadableDirectories}.</p>}
+    <p>No prompts, responses, paths or inferred titles. Explicit header IDs are private/correlatable display metadata, not unique file identities.</p>
+  </details>;
+}
+
+function SourceView({ data, route, workspace, codex }: { data: Snapshot; route: string; workspace: Workspace; codex: boolean }) {
+  const prefix = codex ? '/codex' : '';
   const company = data.companySlots.find(
     (item) => item !== null && route === companyRoute(item),
   );
@@ -93,30 +108,20 @@ export function App({ data }: { data: Snapshot }) {
   const { stats } = data;
   return (
     <>
-      <a
-        className="skip-link"
-        href="#main"
-        onClick={(event) => {
-          event.preventDefault();
-          document.getElementById("main")?.focus();
-        }}
-      >
-        Skip to content
-      </a>
       <header className="app-bar">
-        <a className="brand" href="#/overview" aria-label="Pi usage overview">
+        <a className="brand" href={`#${prefix}/overview`} aria-label={`${codex ? 'Codex' : 'Pi'} usage overview`}>
           <span className="brand-mark" aria-hidden="true">
             π
           </span>
           <span>
-            Pi <b>usage</b>
+            {codex ? 'Codex' : 'Pi'} <b>usage</b>
           </span>
         </a>
         <nav aria-label="Main navigation">
           {routes.map((item) => (
             <a
               key={item}
-              href={`#/${item.toLowerCase()}`}
+              href={`#${prefix}/${item.toLowerCase()}`}
               aria-current={name === item ? "page" : undefined}
             >
               {item}
@@ -127,7 +132,7 @@ export function App({ data }: { data: Snapshot }) {
           <span aria-hidden="true">●</span> Local snapshot
         </span>
       </header>
-      <main id="main" tabIndex={-1}>
+      <div>
         {name === "Overview" ? (
           <Overview data={data} />
         ) : name === "Companies" ? (
@@ -141,12 +146,13 @@ export function App({ data }: { data: Snapshot }) {
         ) : (
           <section className="panel placeholder">
             <h1>View not found</h1>
-            <a href="#/overview">Return to Overview</a>
+            <a href={`#${prefix}/overview`}>Return to Overview</a>
           </section>
         )}
+        {codex && <CodexQuality data={data} info={workspace.codex} />}
         {name !== "Sessions" && name !== "Overview" && (
           <>
-            <Quality data={data} />
+            {!codex && <Quality data={data} />}
             <footer>
               <p>
                 As of <time>{stats.asOf}</time> · Timezone: {stats.timezone}
@@ -159,13 +165,49 @@ export function App({ data }: { data: Snapshot }) {
               </p>
               <p>
                 {window.location.protocol === "file:"
-                  ? "Offline preview · Reloads every 5 minutes. Regeneration is separate; the legacy timer is unchanged."
+                  ? workspace.mode === 'workspace' ? 'Offline workspace · No auto-refresh. Export comparisons before closing; regeneration is separate.' : "Offline preview · Reloads every 5 minutes. Regeneration is separate; the legacy timer is unchanged."
                   : "Local development · Vite updates the UI; reload to collect current usage. The offline preview timer is separate."}
               </p>
             </footer>
           </>
         )}
-      </main>
+      </div>
     </>
   );
+}
+
+export function App({ workspace }: { workspace: Workspace }) {
+  const [route, setRoute] = useState(readRoute);
+  const [visitedCompare, setVisitedCompare] = useState(route === '/compare');
+  useEffect(() => {
+    const change = () => {
+      const next = readRoute();
+      setRoute(next);
+      if (next === '/compare') setVisitedCompare(true);
+    };
+    window.addEventListener('hashchange', change);
+    return () => window.removeEventListener('hashchange', change);
+  }, []);
+  const comparing = route === '/compare';
+  const codex = route.startsWith('/codex/');
+  const data = workspace.sources[codex ? 'codex' : 'pi'];
+  const localRoute = codex ? route.slice('/codex'.length) : route;
+  return <>
+    <a className="skip-link" href="#main" onClick={event => { event.preventDefault(); document.getElementById('main')?.focus(); }}>Skip to content</a>
+    <nav className="source-nav" aria-label="Source navigation">
+      <a href="#/overview" data-active={!codex && !comparing} aria-label={`Pi / Gentle Shell${!codex && !comparing ? ' · Current source' : ''}`}>Pi / Gentle Shell</a>
+      <a href="#/codex/overview" data-active={codex} aria-label={`Codex${codex ? ' · Current source' : ''}`}>Codex</a>
+      <a href="#/compare" data-active={comparing} aria-label={`Compare${comparing ? ' · Current view' : ''}`}>Compare</a>
+    </nav>
+    <main id="main" tabIndex={-1}>
+      {!comparing && <SourceContext value={codex ? 'codex' : 'pi'}>
+        {data ? <SourceView key={codex ? 'codex' : 'pi'} data={data} route={localRoute} workspace={workspace} codex={codex} /> :
+          <section className="panel"><h1>{codex ? 'Codex' : 'Pi'} source unavailable</h1>
+            <p>No usage has been fabricated. Other sources and Compare remain usable.</p>
+            {codex && <CodexQuality data={null} info={workspace.codex} />}</section>}
+      </SourceContext>}
+      {/* Keep captures mounted across source navigation. Hidden views are inert. */}
+      {visitedCompare && <div hidden={!comparing} inert={!comparing}><Compare sources={workspace.sources} /></div>}
+    </main>
+  </>;
 }

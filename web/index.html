@@ -12,7 +12,7 @@
     <script type="module">
       // Development only: the production IIFE still uses its offline HTML bridge.
       try {
-        const response = await fetch('/__pi_usage_snapshot', {
+        const response = await fetch('/__usage_workspace', {
           cache: 'no-store', credentials: 'omit', mode: 'same-origin',
         });
         if (!response.ok) throw new Error('Snapshot unavailable');

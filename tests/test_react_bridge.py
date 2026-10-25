@@ -1475,7 +1475,7 @@ const check = (condition, message) => { if (!condition) throw new Error(message)
         document = document.replace("script-src ", f"script-src 'sha256-{sha(probe)}' ", 1)
         document = document.replace('<script type="application/json"',
                                     f'<script>{probe}</script><script type="application/json"', 1)
-        with tempfile.TemporaryDirectory(dir=DIST, prefix="browser-test-") as name:
+        with tempfile.TemporaryDirectory(prefix="browser-test-") as name:
             directory = Path(name)
             output = directory / "preview.html"
             write_dashboard(output, document)
