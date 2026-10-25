@@ -30,7 +30,13 @@ New workspace collection resolves Pi agent home from `--pi-agent-home`, then
 `PI_CODING_AGENT_SESSION_DIR`, then that agent home's `sessions`; roles and child
 linkage use the selected agent home explicitly. Codex uses `--codex-home`, then
 `CODEX_HOME`, then `~/.codex`. Source homes/paths are configuration only, never
-exported. These options do not change old CLI/default/timer source resolution.
+exported. **`--pi-agent-home` and `--codex-home` are accepted only with
+`--workspace-json` or `--preview-workspace`.** Supplying either root option in
+legacy, `--dev-json`, or `--preview-react` mode exits 2 before any collection,
+rendering or output, with the argparse error:
+`--pi-agent-home and --codex-home require --workspace-json or --preview-workspace`.
+Without these root options, old CLI/default/timer source resolution is unchanged;
+`--sessions` remains supported in both Pi-only and workspace modes.
 Codex reads only supported rollout metadata under `sessions` and
 `archived_sessions`; see [accounting and exclusions](docs/codex-accounting.md).
 No live-source access is implied by running tests.

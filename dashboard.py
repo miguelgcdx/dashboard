@@ -785,10 +785,13 @@ def main(argv=None):
     mode.add_argument('--preview-workspace', action='store_true',
                       help='offline Pi/Codex/Compare workspace without auto-refresh; requires separate --output')
     parser.add_argument('--pi-agent-home', type=Path,
-                        help='workspace Pi agent home (otherwise PI_CODING_AGENT_DIR or ~/.pi/agent)')
+                        help='Pi agent home; only with --workspace-json or --preview-workspace (otherwise PI_CODING_AGENT_DIR or ~/.pi/agent)')
     parser.add_argument('--codex-home', type=Path,
-                        help='workspace Codex home (otherwise CODEX_HOME or ~/.codex)')
+                        help='Codex home; only with --workspace-json or --preview-workspace (otherwise CODEX_HOME or ~/.codex)')
     args = parser.parse_args(argv)
+    if not (args.workspace_json or args.preview_workspace) and (
+            args.pi_agent_home is not None or args.codex_home is not None):
+        parser.error('--pi-agent-home and --codex-home require --workspace-json or --preview-workspace')
     if args.workspace_json or args.preview_workspace:
         if args.workspace_json and args.output is not None:
             parser.error('--workspace-json cannot be combined with --output')

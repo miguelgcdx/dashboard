@@ -1,7 +1,8 @@
 """Source-isolated workspace contracts; all roots and browser data are synthetic."""
-from contextlib import redirect_stdout
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from copy import deepcopy
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -13,6 +14,7 @@ from unittest.mock import patch
 import dashboard
 from codex_usage import collect_codex_usage
 from test_react_bridge import fixture, session_fixture
+from test_codex_usage import NOW, context, counts, meta, usage
 import test_react_bridge as bridge
 import shutil
 
@@ -108,6 +110,89 @@ check(document.documentElement.scrollWidth<=innerWidth,'Workspace overflow');
 
 
 class WorkspaceTests(unittest.TestCase):
+    def test_workspace_root_options_rejected_before_any_pi_mode_side_effect(self):
+        error = '--pi-agent-home and --codex-home require --workspace-json or --preview-workspace'
+        functions = ('collect_workspace', 'collect_combined_usage', 'collect_usage',
+                     'render_dashboard', 'render_react_dashboard',
+                     'render_workspace_dashboard', 'write_dashboard')
+        with tempfile.TemporaryDirectory(prefix='workspace-cli-rejection-') as directory:
+            home = Path(directory)
+            output = home / 'existing.html'
+            output.write_bytes(b'unchanged synthetic output')
+            for mode in ([], ['--dev-json'], ['--preview-react']):
+                for option in ('--pi-agent-home', '--codex-home'):
+                    with self.subTest(mode=mode, option=option), ExitStack() as stack:
+                        mocks = {name: stack.enter_context(patch('dashboard.' + name)) for name in functions}
+                        mocks['collect_workspace'].return_value = '{}'
+                        mocks['collect_combined_usage'].return_value = fixture()
+                        mocks['collect_usage'].return_value = fixture()
+                        stack.enter_context(patch('dashboard.DEFAULT_OUTPUT', output))
+                        stack.enter_context(patch('sys.argv', ['dashboard.py']))
+                        stdout, stderr = io.StringIO(), io.StringIO()
+                        stack.enter_context(redirect_stdout(stdout))
+                        stack.enter_context(redirect_stderr(stderr))
+                        args = [*mode, option, str(home / 'explicit-root'), '--sessions', str(home / 'sessions')]
+                        if mode != ['--dev-json']:
+                            args += ['--output', str(home / 'separate.html')]
+                        before = {path.name: path.read_bytes() for path in home.iterdir()}
+                        exit_code = 0
+                        try:
+                            dashboard.main(args)
+                        except SystemExit as rejected:
+                            exit_code = rejected.code
+                        self.assertEqual(exit_code, 2, (stdout.getvalue(), stderr.getvalue()))
+                        self.assertEqual(stdout.getvalue(), '')
+                        self.assertEqual(stderr.getvalue().splitlines()[-1], 'dashboard.py: error: ' + error)
+                        for mock in mocks.values():
+                            mock.assert_not_called()
+                        self.assertEqual({path.name: path.read_bytes() for path in home.iterdir()}, before)
+
+    def test_collector_workspace_accounting_privacy_and_source_immutability_seam(self):
+        with tempfile.TemporaryDirectory(prefix='workspace-accounting-seam-') as directory:
+            home = Path(directory)
+            (home / 'sessions').mkdir()
+            (home / 'archived_sessions').mkdir()
+            hostile = '</script><img src=x onerror=alert(1)>'
+            prefix = [meta('parent', model_provider='explicit', cwd='SECRET_CWD', title='SECRET_TITLE'),
+                      context(hostile),
+                      {'type': 'response_item', 'payload': {'prompt': 'SECRET_PROMPT',
+                       'tool': {'arguments': 'SECRET_TOOL'}}}, usage()]
+            records = {
+                'sessions/rollout-parent.jsonl': prefix + [usage(), usage(counts(150, 40, 15, 50))],
+                'archived_sessions/rollout-prefix.jsonl': prefix,
+                'sessions/rollout-child.jsonl': [meta('child', source={'subagent': {'thread_spawn': {
+                    'parent_thread_id': 'parent', 'agent_role': 'reviewer'}}}), context(), usage()],
+                'sessions/rollout-reset.jsonl': [meta('reset'), context(), usage(), usage(counts(99))],
+                'sessions/rollout-fork.jsonl': [meta('fork', forked_from_id='parent'), context(), usage()],
+            }
+            for name, items in records.items():
+                (home / name).write_text(''.join(json.dumps(item) + '\n' for item in items), encoding='utf-8')
+            def hashes():
+                return {str(path.relative_to(home)): hashlib.sha256(path.read_bytes()).hexdigest()
+                        for path in home.rglob('*') if path.is_file()}
+            before = hashes()
+            collected = collect_codex_usage(home, now=NOW, tz='UTC')
+            payload = dashboard.workspace_json(fixture(), collected)
+            wire = json.loads(payload)['sources']['codex']
+            snapshot = wire['snapshot']
+            self.assertEqual([item['sessionId'] for item in snapshot['sessions']], ['child', 'parent'])
+            def tokens(rows):
+                return sum(int(row[key]) for row in rows
+                           for key in ('input', 'cacheRead', 'cacheWrite', 'output'))
+            self.assertEqual(tokens(snapshot['rows']), 330)
+            parent = next(item for item in snapshot['sessions'] if item['sessionId'] == 'parent')
+            self.assertEqual(tokens([model for day in parent['days'] for model in day['models']]), 200)
+            self.assertEqual(snapshot['roles'], ['reviewer'])
+            self.assertEqual({row['role'] for row in snapshot['rows']}, {None, 'reviewer'})
+            self.assertEqual([row['provider'] for row in snapshot['rows'] if row['role'] is None], ['explicit'])
+            self.assertEqual(parent['days'][0]['models'][0]['model'], hostile)
+            self.assertFalse(wire['metadata']['costAvailable'])
+            for key in ('duplicateFiles', 'invalidCounters', 'forkedThreads'):
+                self.assertEqual(wire['metadata']['warnings'][key], 1)
+            for forbidden in ('SECRET_', str(home), '</script>'):
+                self.assertNotIn(forbidden, payload)
+            self.assertEqual(hashes(), before)
+
     def test_envelope_allowlists_isolation_and_capabilities(self):
         pi, codex = fixture(), codex_fixture()
         codex['codex']['private'] = '/PRIVATE_ROOT'
@@ -158,13 +243,26 @@ class WorkspaceTests(unittest.TestCase):
                 self.assertTrue(value['sources']['pi']['snapshot']['rows'])
 
     def test_workspace_cli_no_output_and_offline_no_refresh_preserves_old_preview(self):
-        with patch('dashboard.collect_workspace', return_value=dashboard.workspace_json(fixture(), codex_fixture())) as collect, \
-             patch('dashboard.write_dashboard') as writer, redirect_stdout(io.StringIO()) as output:
-            dashboard.main(['--workspace-json', '--pi-agent-home', '/synthetic/pi', '--codex-home', '/synthetic/codex', '--sessions', '/synthetic/parents'])
-            collect.assert_called_once_with(Path('/synthetic/pi'), Path('/synthetic/codex'), Path('/synthetic/parents'))
-            writer.assert_not_called()
-            self.assertEqual(json.loads(output.getvalue())['workspaceVersion'], 1)
-            self.assertEqual(output.getvalue(), collect.return_value + '\n')
+        for mode in ('--workspace-json', '--preview-workspace'):
+            with self.subTest(mode=mode), \
+                 patch('dashboard.collect_workspace', return_value=dashboard.workspace_json(fixture(), codex_fixture())) as collect, \
+                 patch('dashboard.render_workspace_dashboard', return_value='synthetic HTML') as render, \
+                 patch('dashboard.write_dashboard') as writer, \
+                 redirect_stdout(io.StringIO()) as output, redirect_stderr(io.StringIO()) as errors:
+                args = [mode, '--pi-agent-home', '/synthetic/pi', '--codex-home', '/synthetic/codex', '--sessions', '/synthetic/parents']
+                if mode == '--preview-workspace':
+                    args += ['--output', '/synthetic/separate-workspace.html']
+                self.assertIsNone(dashboard.main(args))
+                collect.assert_called_once_with(Path('/synthetic/pi'), Path('/synthetic/codex'), Path('/synthetic/parents'))
+                self.assertEqual(errors.getvalue(), '')
+                if mode == '--workspace-json':
+                    writer.assert_not_called()
+                    render.assert_not_called()
+                    self.assertEqual(output.getvalue(), collect.return_value + '\n')
+                else:
+                    render.assert_called_once_with(collect.return_value, ROOT / 'web/dist')
+                    writer.assert_called_once_with(Path('/synthetic/separate-workspace.html'), 'synthetic HTML')
+                    self.assertEqual(output.getvalue(), 'Dashboard updated (private usage workspace).\n')
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory)
             (assets / 'dashboard.js').write_text('/* synthetic script */')
