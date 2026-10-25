@@ -439,10 +439,15 @@ os.execv(REAL_PYTHON, [REAL_PYTHON, *sys.argv[1:]])
                         env={'PATH': os.defpath, 'HOME': name, 'XDG_CONFIG_HOME': str(profile / 'config'),
                              'XDG_CACHE_HOME': str(profile / 'cache'), 'LANG': 'C.UTF-8'})
                     self.assertEqual(result.returncode, 0)
-                    self.assertIn('<h1>Overview</h1>', result.stdout)
-                    self.assertIn('gpt-codex-only', result.stdout)
-                    self.assertIn('Recorded cost</h2><strong>Unavailable</strong>', result.stdout)
-                    self.assertNotIn('gpt-dev-fixture', result.stdout)
+                    # The embedded workspace contains both sources; isolation applies
+                    # to the rendered active view, not its private JSON payload.
+                    rendered = re.search(r'<main\b[^>]*>(.*?)</main>', result.stdout, re.S)
+                    self.assertIsNotNone(rendered, 'Expected the rendered Codex main view')
+                    view = rendered.group(1)
+                    self.assertIn('<h1>Overview</h1>', view)
+                    self.assertIn('gpt-codex-only', view)
+                    self.assertIn('Recorded cost</h2><strong>Unavailable</strong>', view)
+                    self.assertNotIn('gpt-dev-fixture', view)
             (home / 'collector-mode').write_text('fail')
             with self.assertRaises(urllib.error.HTTPError) as failed:
                 opener.open(endpoint, timeout=10)
